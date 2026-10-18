@@ -1,0 +1,294 @@
+import asyncio
+import logging
+from decimal import Decimal
+
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    Update,
+)
+from telegram.error import TelegramError
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from channel_access import issue_channel_access
+from config import Settings
+from database import Database
+from payments import generate_payment_link
+
+log = logging.getLogger(__name__)
+
+MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
+    [["Оформить доступ"], ["Мой доступ", "О клубе"], ["Поддержка"]],
+    resize_keyboard=True,
+    is_persistent=True,
+    input_field_placeholder="Выберите действие",
+)
+
+
+def start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Оформить доступ", callback_data="buy_access")],
+            [InlineKeyboardButton("Что внутри?", callback_data="about")],
+        ]
+    )
+
+
+async def send_welcome(update: Update) -> None:
+    await update.effective_message.reply_text(
+        "Добро пожаловать в закрытый маникюрный клуб ✨\n\n"
+        "Здесь будут разборы техник, идеи дизайна, полезные материалы "
+        "и профессиональные подсказки. Сейчас бот работает в тестовом режиме.",
+        reply_markup=start_keyboard(),
+    )
+    await update.effective_message.reply_text(
+        "Используйте меню, чтобы посмотреть макет бота.",
+        reply_markup=MAIN_MENU_KEYBOARD,
+    )
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    database: Database = context.application.bot_data["database"]
+    user = update.effective_user
+    database.upsert_user(user.id, user.username)
+    database.mark_welcome_sent(user.id)
+    await send_welcome(update)
+
+
+async def about(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        "В закрытом клубе планируются:\n\n"
+        "• пошаговые разборы маникюра;\n"
+        "• подборки дизайнов;\n"
+        "• рекомендации по материалам и инструментам;\n"
+        "• ответы на частые вопросы.\n\n"
+        "Содержание пока демонстрационное и будет обновлено перед запуском.",
+        reply_markup=MAIN_MENU_KEYBOARD,
+    )
+
+
+async def show_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    database: Database = context.application.bot_data["database"]
+    user = update.effective_user
+    database.upsert_user(user.id, user.username)
+
+    if database.is_paid(user.id):
+        await send_channel_access(update, context)
+        return
+
+    if not settings.payment_configured:
+        await update.effective_message.reply_text(
+            "Оплата пока недоступна: бот работает в тестовом режиме.\n\n"
+            "После подключения Robokassa здесь появится кнопка оплаты, "
+            "а доступ в закрытый канал будет выдаваться автоматически.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "Оплата скоро появится", callback_data="payment_unavailable"
+                        )
+                    ]
+                ]
+            ),
+        )
+        return
+
+    if not settings.channel_configured:
+        await update.effective_message.reply_text(
+            "Закрытый канал ещё настраивается, поэтому оплата временно "
+            "недоступна. Кнопка появится после подключения канала.",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
+        return
+
+    order = database.get_or_create_pending_order(user.id, user.username, settings.cost)
+    if order is None:
+        await send_channel_access(update, context)
+        return
+    payment_url = generate_payment_link(
+        settings, order["inv_id"], Decimal(order["amount"])
+    )
+    await update.effective_message.reply_text(
+        f"Доступ в закрытый клуб: {settings.cost:.2f}.\n"
+        "После подтверждения оплаты бот пришлёт персональную ссылку.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Перейти к оплате", url=payment_url)]]
+        ),
+    )
+
+
+async def send_channel_access(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    database: Database = context.application.bot_data["database"]
+    user = update.effective_user
+    database.upsert_user(user.id, user.username)
+
+    if not database.is_paid(user.id):
+        await update.effective_message.reply_text(
+            "Оплата ещё не подтверждена. Доступ в закрытый канал пока не открыт.",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
+        return
+    if not settings.channel_configured:
+        await update.effective_message.reply_text(
+            "Оплата подтверждена, но закрытый канал ещё настраивается. "
+            "Ссылка будет отправлена после подключения канала.",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
+        return
+
+    try:
+        await issue_channel_access(
+            context.bot,
+            settings,
+            database,
+            user.id,
+            member_reply_markup=MAIN_MENU_KEYBOARD,
+        )
+    except TelegramError as exc:
+        log.error(
+            "Channel access failed user_id=%s error_type=%s",
+            user.id,
+            type(exc).__name__,
+        )
+        await update.effective_message.reply_text(
+            "Не удалось создать ссылку на канал. Попробуйте позже.",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
+
+
+async def support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if settings.support_url:
+        markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Написать в поддержку", url=settings.support_url)]]
+        )
+        text = "Если возник вопрос, напишите в поддержку."
+    else:
+        markup = MAIN_MENU_KEYBOARD
+        text = "Контакты поддержки появятся здесь перед полноценным запуском."
+    await update.effective_message.reply_text(text, reply_markup=markup)
+
+
+async def offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if settings.offer_file_path is None:
+        await update.effective_message.reply_text(
+            "Оферта будет опубликована перед подключением оплаты.",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
+        return
+    with settings.offer_file_path.open("rb") as document:
+        await update.effective_message.reply_document(
+            document=document,
+            filename=settings.offer_file_path.name,
+            reply_markup=MAIN_MENU_KEYBOARD,
+            protect_content=True,
+        )
+
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if query.data == "buy_access":
+        await show_payment(update, context)
+    elif query.data == "about":
+        await about(update, context)
+    elif query.data == "payment_unavailable":
+        await query.message.reply_text(
+            "Мы сообщим о запуске оплаты после завершения настройки.",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
+
+
+async def delivery_worker(application: Application) -> None:
+    settings: Settings = application.bot_data["settings"]
+    database: Database = application.bot_data["database"]
+    if settings.access_chat_id is None:
+        return
+    while True:
+        try:
+            for user_id in database.paid_users_without_channel_access(
+                settings.access_chat_id
+            ):
+                try:
+                    await issue_channel_access(
+                        application.bot, settings, database, user_id
+                    )
+                except TelegramError as exc:
+                    log.warning(
+                        "Channel delivery retry failed user_id=%s error_type=%s",
+                        user_id,
+                        type(exc).__name__,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.error("Delivery worker error error_type=%s", type(exc).__name__)
+        await asyncio.sleep(settings.delivery_retry_seconds)
+
+
+async def post_init(application: Application) -> None:
+    settings: Settings = application.bot_data["settings"]
+    me = await application.bot.get_me()
+    log.info(
+        "Bot started username=%s payments_configured=%s channel_configured=%s",
+        me.username,
+        settings.payment_configured,
+        settings.channel_configured,
+    )
+    if settings.channel_configured:
+        application.bot_data["delivery_task"] = asyncio.create_task(
+            delivery_worker(application)
+        )
+
+
+async def post_shutdown(application: Application) -> None:
+    task = application.bot_data.get("delivery_task")
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.error("Telegram handler error error_type=%s", type(context.error).__name__)
+
+
+def build_application(settings: Settings, database: Database) -> Application:
+    application = (
+        ApplicationBuilder()
+        .token(settings.token)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
+    application.bot_data.update(settings=settings, database=database)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(
+        MessageHandler(filters.Regex("^Оформить доступ$"), show_payment)
+    )
+    application.add_handler(
+        MessageHandler(filters.Regex("^Мой доступ$"), send_channel_access)
+    )
+    application.add_handler(MessageHandler(filters.Regex("^О клубе$"), about))
+    application.add_handler(MessageHandler(filters.Regex("^Поддержка$"), support))
+    application.add_handler(MessageHandler(filters.Regex("^Оферта$"), offer))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support))
+    application.add_error_handler(error_handler)
+    return application

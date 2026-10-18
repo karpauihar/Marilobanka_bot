@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.idea/
+.venv/
+bot_tg/.env
+bot_tg/.venv/
+bot_tg/*.db
+bot_tg/*.db-shm
+bot_tg/*.db-wal
+bot_tg/logs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
