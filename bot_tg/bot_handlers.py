@@ -43,13 +43,31 @@ def start_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def send_welcome(update: Update) -> None:
-    await update.effective_message.reply_text(
-        "Добро пожаловать в закрытый маникюрный клуб ✨\n\n"
-        "Здесь будут разборы техник, идеи дизайна, полезные материалы "
-        "и профессиональные подсказки. Сейчас бот работает в тестовом режиме.",
-        reply_markup=start_keyboard(),
-    )
+async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    welcome_sent = False
+    if settings.welcome_configured:
+        try:
+            await context.bot.copy_message(
+                chat_id=update.effective_chat.id,
+                from_chat_id=settings.welcome_chat_id,
+                message_id=settings.welcome_message_id,
+                reply_markup=start_keyboard(),
+            )
+            welcome_sent = True
+        except TelegramError as exc:
+            log.warning(
+                "Welcome copy failed error_type=%s",
+                type(exc).__name__,
+            )
+
+    if not welcome_sent:
+        await update.effective_message.reply_text(
+            "Добро пожаловать в закрытый маникюрный клуб ✨\n\n"
+            "Здесь будут разборы техник, идеи дизайна, полезные материалы "
+            "и профессиональные подсказки. Сейчас бот работает в тестовом режиме.",
+            reply_markup=start_keyboard(),
+        )
     await update.effective_message.reply_text(
         "Используйте меню, чтобы посмотреть макет бота.",
         reply_markup=MAIN_MENU_KEYBOARD,
@@ -61,7 +79,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     database.upsert_user(user.id, user.username)
     database.mark_welcome_sent(user.id)
-    await send_welcome(update)
+    await send_welcome(update, context)
 
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -244,10 +262,12 @@ async def post_init(application: Application) -> None:
     settings: Settings = application.bot_data["settings"]
     me = await application.bot.get_me()
     log.info(
-        "Bot started username=%s payments_configured=%s channel_configured=%s",
+        "Bot started username=%s payments_configured=%s channel_configured=%s "
+        "welcome_configured=%s",
         me.username,
         settings.payment_configured,
         settings.channel_configured,
+        settings.welcome_configured,
     )
     if settings.channel_configured:
         application.bot_data["delivery_task"] = asyncio.create_task(

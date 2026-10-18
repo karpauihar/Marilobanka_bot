@@ -56,6 +56,8 @@ class Settings:
     url_prefix: str
     cost: Decimal
     access_chat_id: int | None
+    welcome_chat_id: int | None
+    welcome_message_id: int | None
     support_url: str
     offer_file_path: Path | None
     database_path: Path
@@ -77,6 +79,10 @@ class Settings:
     @property
     def channel_configured(self) -> bool:
         return self.access_chat_id is not None
+
+    @property
+    def welcome_configured(self) -> bool:
+        return self.welcome_chat_id is not None and self.welcome_message_id is not None
 
 
 @lru_cache(maxsize=1)
@@ -104,6 +110,15 @@ def load_settings() -> Settings:
     if offer_file_path is not None and not offer_file_path.is_file():
         raise RuntimeError(f"Offer file does not exist: {offer_file_path}")
 
+    welcome_chat_id = _optional_int("WELCOME_CHAT_ID")
+    welcome_message_id = _optional_int("WELCOME_MESSAGE_ID")
+    if (welcome_chat_id is None) != (welcome_message_id is None):
+        raise RuntimeError(
+            "WELCOME_CHAT_ID and WELCOME_MESSAGE_ID must be set together"
+        )
+    if welcome_message_id is not None and welcome_message_id <= 0:
+        raise RuntimeError("WELCOME_MESSAGE_ID must be greater than zero")
+
     return Settings(
         token=token,
         merchant_login=os.getenv("MERCHANT_LOGIN", "").strip(),
@@ -113,6 +128,8 @@ def load_settings() -> Settings:
         url_prefix=_url_prefix(os.getenv("URL_PREFIX", "/bots/marilobanka")),
         cost=cost,
         access_chat_id=_optional_int("ACCESS_CHAT_ID"),
+        welcome_chat_id=welcome_chat_id,
+        welcome_message_id=welcome_message_id,
         support_url=os.getenv("SUPPORT_URL", "").strip(),
         offer_file_path=offer_file_path,
         database_path=_path("DATABASE_PATH", "bot.db"),

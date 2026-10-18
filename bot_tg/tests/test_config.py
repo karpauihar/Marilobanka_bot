@@ -12,6 +12,7 @@ class ConfigTests(unittest.TestCase):
             settings = make_settings(Path(directory), configured=False)
         self.assertFalse(settings.payment_configured)
         self.assertFalse(settings.channel_configured)
+        self.assertFalse(settings.welcome_configured)
         self.assertEqual(settings.cost, Decimal(0))
 
     def test_complete_settings_enable_payment_and_channel(self) -> None:
@@ -19,3 +20,4 @@ class ConfigTests(unittest.TestCase):
             settings = make_settings(Path(directory))
         self.assertTrue(settings.payment_configured)
         self.assertTrue(settings.channel_configured)
+        self.assertTrue(settings.welcome_configured)
