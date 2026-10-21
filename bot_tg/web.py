@@ -67,6 +67,8 @@ def create_app(
             "status": "ok",
             "payments_configured": settings.payment_configured,
             "channel_configured": settings.channel_configured,
+            "fiscalization_configured": settings.fiscalization_configured,
+            "robokassa_test": settings.robokassa_test,
         }
 
     return app

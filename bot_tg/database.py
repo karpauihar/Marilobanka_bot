@@ -1,9 +1,12 @@
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+
+ROBOKASSA_INV_ID_FLOOR = 1_000_000_000_000
 
 
 def utc_now() -> str:
@@ -41,6 +44,8 @@ class Database:
                     status TEXT NOT NULL DEFAULT 'new'
                         CHECK (status IN ('new', 'pending', 'paid')),
                     welcome_sent_at TEXT,
+                    current_inv_id INTEGER,
+                    paid_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -67,6 +72,15 @@ class Database:
                 );
                 """
             )
+            user_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(users)")
+            }
+            if "current_inv_id" not in user_columns:
+                connection.execute(
+                    "ALTER TABLE users ADD COLUMN current_inv_id INTEGER"
+                )
+            if "paid_at" not in user_columns:
+                connection.execute("ALTER TABLE users ADD COLUMN paid_at TEXT")
 
     def upsert_user(self, user_id: int, username: str | None) -> sqlite3.Row:
         now = utc_now()
@@ -117,18 +131,35 @@ class Database:
                 "SELECT * FROM orders WHERE user_id = ? AND status = 'pending' ORDER BY inv_id DESC LIMIT 1",
                 (user_id,),
             ).fetchone()
-            if pending:
+            if pending and pending["inv_id"] >= ROBOKASSA_INV_ID_FLOOR:
                 return pending
-            cursor = connection.execute(
-                "INSERT INTO orders (user_id, amount, created_at) VALUES (?, ?, ?)",
-                (user_id, amount_text, now),
+
+            if pending:
+                connection.execute(
+                    "UPDATE orders SET status = 'cancelled' WHERE inv_id = ?",
+                    (pending["inv_id"],),
+                )
+
+            latest_inv_id = connection.execute(
+                "SELECT COALESCE(MAX(inv_id), 0) FROM orders"
+            ).fetchone()[0]
+            inv_id = max(
+                ROBOKASSA_INV_ID_FLOOR,
+                time.time_ns() // 1_000_000,
+                latest_inv_id + 1,
             )
             connection.execute(
-                "UPDATE users SET status = 'pending', updated_at = ? WHERE user_id = ?",
-                (now, user_id),
+                "INSERT INTO orders (inv_id, user_id, amount, status, created_at) "
+                "VALUES (?, ?, ?, 'pending', ?)",
+                (inv_id, user_id, amount_text, now),
+            )
+            connection.execute(
+                "UPDATE users SET status = 'pending', current_inv_id = ?, "
+                "updated_at = ? WHERE user_id = ?",
+                (inv_id, now, user_id),
             )
             return connection.execute(
-                "SELECT * FROM orders WHERE inv_id = ?", (cursor.lastrowid,)
+                "SELECT * FROM orders WHERE inv_id = ?", (inv_id,)
             ).fetchone()
 
     def get_order(self, inv_id: int) -> sqlite3.Row | None:
@@ -155,8 +186,9 @@ class Database:
                 (now, inv_id),
             )
             connection.execute(
-                "UPDATE users SET status = 'paid', updated_at = ? WHERE user_id = ?",
-                (now, order["user_id"]),
+                "UPDATE users SET status = 'paid', paid_at = COALESCE(paid_at, ?), "
+                "current_inv_id = ?, updated_at = ? WHERE user_id = ?",
+                (now, inv_id, now, order["user_id"]),
             )
             return "paid_now"
 

@@ -52,6 +52,7 @@ class Settings:
     merchant_login: str
     password_1: str
     password_2: str
+    password_3: str
     server_url: str
     url_prefix: str
     cost: Decimal
@@ -63,6 +64,12 @@ class Settings:
     database_path: Path
     log_path: Path
     robokassa_test: bool
+    fiscalization_mode: str
+    receipt_sno: str
+    receipt_tax: str
+    receipt_payment_method: str
+    receipt_payment_object: str
+    receipt_item_name: str
     delivery_retry_seconds: int
     log_level: str
 
@@ -74,7 +81,21 @@ class Settings:
             and self.password_2
             and self.server_url
             and self.cost > 0
+            and self.fiscalization_configured
         )
+
+    @property
+    def fiscalization_configured(self) -> bool:
+        if self.fiscalization_mode == "npd":
+            return True
+        if self.fiscalization_mode == "receipt":
+            return bool(
+                self.receipt_tax
+                and self.receipt_payment_method
+                and self.receipt_payment_object
+                and self.receipt_item_name
+            )
+        return False
 
     @property
     def channel_configured(self) -> bool:
@@ -119,11 +140,71 @@ def load_settings() -> Settings:
     if welcome_message_id is not None and welcome_message_id <= 0:
         raise RuntimeError("WELCOME_MESSAGE_ID must be greater than zero")
 
+    robokassa_test = _as_bool(os.getenv("ROBOKASSA_TEST", "0"))
+    password_1_name = "PASS_TEST_1" if robokassa_test else "PASS_1"
+    password_2_name = "PASS_TEST_2" if robokassa_test else "PASS_2"
+
+    fiscalization_mode = os.getenv("FISCALIZATION_MODE", "").strip().lower()
+    if fiscalization_mode not in {"", "npd", "receipt"}:
+        raise RuntimeError("FISCALIZATION_MODE must be 'npd' or 'receipt'")
+
+    receipt_sno = os.getenv("RECEIPT_SNO", "").strip().lower()
+    if receipt_sno and receipt_sno not in {
+        "osn",
+        "usn_income",
+        "usn_income_outcome",
+        "esn",
+        "patent",
+    }:
+        raise RuntimeError("RECEIPT_SNO contains an unsupported value")
+
+    receipt_tax = os.getenv("RECEIPT_TAX", "").strip().lower()
+    if receipt_tax and receipt_tax not in {
+        "none",
+        "vat0",
+        "vat5",
+        "vat7",
+        "vat10",
+        "vat20",
+        "vat22",
+        "vat105",
+        "vat107",
+        "vat110",
+        "vat120",
+        "vat122",
+    }:
+        raise RuntimeError("RECEIPT_TAX contains an unsupported value")
+
+    receipt_payment_method = os.getenv("RECEIPT_PAYMENT_METHOD", "").strip()
+    if receipt_payment_method and receipt_payment_method not in {
+        "full_prepayment",
+        "prepayment",
+        "advance",
+        "full_payment",
+        "partial_payment",
+        "credit",
+        "credit_payment",
+    }:
+        raise RuntimeError("RECEIPT_PAYMENT_METHOD contains an unsupported value")
+
+    receipt_payment_object = os.getenv("RECEIPT_PAYMENT_OBJECT", "").strip()
+    if receipt_payment_object and receipt_payment_object not in {
+        "commodity",
+        "job",
+        "service",
+        "intellectual_activity",
+        "payment",
+        "another",
+        "property_right",
+    }:
+        raise RuntimeError("RECEIPT_PAYMENT_OBJECT contains an unsupported value")
+
     return Settings(
         token=token,
         merchant_login=os.getenv("MERCHANT_LOGIN", "").strip(),
-        password_1=os.getenv("PASSWORD_1", "").strip(),
-        password_2=os.getenv("PASSWORD_2", "").strip(),
+        password_1=os.getenv(password_1_name, "").strip(),
+        password_2=os.getenv(password_2_name, "").strip(),
+        password_3=os.getenv("PASS_3", "").strip(),
         server_url=server_url,
         url_prefix=_url_prefix(os.getenv("URL_PREFIX", "/bots/marilobanka")),
         cost=cost,
@@ -134,7 +215,13 @@ def load_settings() -> Settings:
         offer_file_path=offer_file_path,
         database_path=_path("DATABASE_PATH", "bot.db"),
         log_path=_path("LOG_PATH", "logs/app.log"),
-        robokassa_test=_as_bool(os.getenv("ROBOKASSA_TEST", "0")),
+        robokassa_test=robokassa_test,
+        fiscalization_mode=fiscalization_mode,
+        receipt_sno=receipt_sno,
+        receipt_tax=receipt_tax,
+        receipt_payment_method=receipt_payment_method,
+        receipt_payment_object=receipt_payment_object,
+        receipt_item_name=os.getenv("RECEIPT_ITEM_NAME", "").strip(),
         delivery_retry_seconds=max(5, int(os.getenv("DELIVERY_RETRY_SECONDS", "15"))),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
     )

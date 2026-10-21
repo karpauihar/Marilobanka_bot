@@ -1,7 +1,8 @@
 import hashlib
 import hmac
+import json
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlencode
+from urllib.parse import quote_plus, urlencode
 
 from config import Settings
 
@@ -17,6 +18,26 @@ def format_amount(amount: Decimal) -> str:
     return f"{amount:.2f}"
 
 
+def generate_receipt(settings: Settings, amount: Decimal) -> str | None:
+    if settings.fiscalization_mode != "receipt":
+        return None
+    receipt: dict[str, object] = {
+        "items": [
+            {
+                "name": settings.receipt_item_name,
+                "quantity": 1,
+                "sum": float(format_amount(amount)),
+                "payment_method": settings.receipt_payment_method,
+                "payment_object": settings.receipt_payment_object,
+                "tax": settings.receipt_tax,
+            }
+        ]
+    }
+    if settings.receipt_sno:
+        receipt["sno"] = settings.receipt_sno
+    return json.dumps(receipt, ensure_ascii=False, separators=(",", ":"))
+
+
 def generate_payment_link(
     settings: Settings,
     inv_id: int,
@@ -24,22 +45,26 @@ def generate_payment_link(
 ) -> str:
     if not settings.payment_configured:
         raise RuntimeError("Robokassa is not configured")
-    amount = format_amount(order_amount if order_amount is not None else settings.cost)
-    signature = calculate_signature(
-        settings.merchant_login,
-        amount,
-        inv_id,
-        settings.password_1,
-    )
+    order_amount = order_amount if order_amount is not None else settings.cost
+    amount = format_amount(order_amount)
+    receipt = generate_receipt(settings, order_amount)
+    signature_parts: list[object] = [settings.merchant_login, amount, inv_id]
+    encoded_receipt = quote_plus(receipt) if receipt is not None else None
+    if encoded_receipt is not None:
+        signature_parts.append(encoded_receipt)
+    signature_parts.append(settings.password_1)
+    signature = calculate_signature(*signature_parts)
     params = {
         "MerchantLogin": settings.merchant_login,
         "OutSum": amount,
         "InvId": inv_id,
-        "Description": "Доступ в закрытый маникюрный клуб",
+        "Description": "Гайд «Домашний уход за стопами»",
         "SignatureValue": signature,
         "IsTest": "1" if settings.robokassa_test else "0",
         "Culture": "ru",
     }
+    if encoded_receipt is not None:
+        params["Receipt"] = encoded_receipt
     return f"{ROBOKASSA_PAYMENT_URL}?{urlencode(params)}"
 
 

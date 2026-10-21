@@ -5,12 +5,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from bot_handlers import send_welcome, show_payment
+from bot_handlers import MAIN_MENU_KEYBOARD, offer, send_welcome, show_payment
 from database import Database
 from tests.helpers import make_settings
 
 
 class PaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
+    def test_main_menu_contains_offer(self) -> None:
+        labels = [button.text for row in MAIN_MENU_KEYBOARD.keyboard for button in row]
+        self.assertIn("Оферта", labels)
+
     async def test_payment_is_hidden_until_channel_is_configured(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings = replace(make_settings(Path(directory)), access_chat_id=None)
@@ -56,3 +60,26 @@ class WelcomeHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call["from_chat_id"], settings.welcome_chat_id)
             self.assertEqual(call["message_id"], settings.welcome_message_id)
             self.assertEqual(message.reply_text.await_count, 1)
+
+
+class OfferHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_offer_pdf_is_sent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            offer_path = Path(directory) / "offer.pdf"
+            offer_path.write_bytes(b"%PDF-test")
+            settings = replace(
+                make_settings(Path(directory)), offer_file_path=offer_path
+            )
+            message = SimpleNamespace(reply_document=AsyncMock())
+            update = SimpleNamespace(effective_message=message)
+            context = SimpleNamespace(
+                application=SimpleNamespace(bot_data={"settings": settings})
+            )
+
+            await offer(update, context)
+
+            message.reply_document.assert_awaited_once()
+            self.assertEqual(
+                message.reply_document.await_args.kwargs["filename"],
+                offer_path.name,
+            )

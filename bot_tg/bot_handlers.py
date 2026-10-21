@@ -27,7 +27,11 @@ from payments import generate_payment_link
 log = logging.getLogger(__name__)
 
 MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
-    [["Оформить доступ"], ["Мой доступ", "О клубе"], ["Поддержка"]],
+    [
+        ["Оформить доступ"],
+        ["Мой доступ", "О гайде"],
+        ["Оферта", "Поддержка"],
+    ],
     resize_keyboard=True,
     is_persistent=True,
     input_field_placeholder="Выберите действие",
@@ -39,6 +43,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton("Оформить доступ", callback_data="buy_access")],
             [InlineKeyboardButton("Что внутри?", callback_data="about")],
+            [InlineKeyboardButton("Оферта", callback_data="offer")],
         ]
     )
 
@@ -63,9 +68,9 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if not welcome_sent:
         await update.effective_message.reply_text(
-            "Добро пожаловать в закрытый маникюрный клуб ✨\n\n"
-            "Здесь будут разборы техник, идеи дизайна, полезные материалы "
-            "и профессиональные подсказки. Сейчас бот работает в тестовом режиме.",
+            "Добро пожаловать! ✨\n\n"
+            "Здесь находится гайд «Домашний уход за стопами» и дополнительные "
+            "информационные материалы. Сейчас бот работает в тестовом режиме.",
             reply_markup=start_keyboard(),
         )
     await update.effective_message.reply_text(
@@ -84,12 +89,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "В закрытом клубе планируются:\n\n"
-        "• пошаговые разборы маникюра;\n"
-        "• подборки дизайнов;\n"
-        "• рекомендации по материалам и инструментам;\n"
-        "• ответы на частые вопросы.\n\n"
-        "Содержание пока демонстрационное и будет обновлено перед запуском.",
+        "Гайд «Домашний уход за стопами» содержит информационные материалы "
+        "по безопасному домашнему уходу.\n\n"
+        "Материалы не являются медицинской услугой, диагнозом или "
+        "индивидуальным назначением и не заменяют консультацию врача.",
         reply_markup=MAIN_MENU_KEYBOARD,
     )
 
@@ -115,7 +118,8 @@ async def show_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                         InlineKeyboardButton(
                             "Оплата скоро появится", callback_data="payment_unavailable"
                         )
-                    ]
+                    ],
+                    [InlineKeyboardButton("Оферта", callback_data="offer")],
                 ]
             ),
         )
@@ -137,10 +141,15 @@ async def show_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         settings, order["inv_id"], Decimal(order["amount"])
     )
     await update.effective_message.reply_text(
-        f"Доступ в закрытый клуб: {settings.cost:.2f}.\n"
-        "После подтверждения оплаты бот пришлёт персональную ссылку.",
+        f"Гайд «Домашний уход за стопами»: {settings.cost:.2f} ₽.\n\n"
+        "После подтверждения оплаты бот пришлёт персональную ссылку.\n\n"
+        "Нажимая «Перейти к оплате», вы подтверждаете, что ознакомились "
+        "с условиями публичной оферты и принимаете их.",
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("Перейти к оплате", url=payment_url)]]
+            [
+                [InlineKeyboardButton("Перейти к оплате", url=payment_url)],
+                [InlineKeyboardButton("Оферта", callback_data="offer")],
+            ]
         ),
     )
 
@@ -224,6 +233,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await show_payment(update, context)
     elif query.data == "about":
         await about(update, context)
+    elif query.data == "offer":
+        await offer(update, context)
     elif query.data == "payment_unavailable":
         await query.message.reply_text(
             "Мы сообщим о запуске оплаты после завершения настройки.",
@@ -306,7 +317,7 @@ def build_application(settings: Settings, database: Database) -> Application:
     application.add_handler(
         MessageHandler(filters.Regex("^Мой доступ$"), send_channel_access)
     )
-    application.add_handler(MessageHandler(filters.Regex("^О клубе$"), about))
+    application.add_handler(MessageHandler(filters.Regex("^О гайде$"), about))
     application.add_handler(MessageHandler(filters.Regex("^Поддержка$"), support))
     application.add_handler(MessageHandler(filters.Regex("^Оферта$"), offer))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support))

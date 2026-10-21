@@ -1,16 +1,14 @@
-# Telegram-бот маникюрного клуба
+# Telegram-бот «Домашний уход за стопами»
 
-Бот оформляет доступ в закрытый Telegram-канал. Сейчас проект работает в демонстрационном режиме: интерфейс доступен, но оплата отключена до добавления реквизитов Robokassa. Без подтверждённой оплаты бот не создаёт ссылку на канал.
+Бот оформляет оплату информационного гайда и выдаёт покупателю одноразовую
+ссылку в закрытый Telegram-канал. Архитектура разделена на два независимых
+процесса, использующих одну SQLite-базу:
 
-## Возможности
+- `marilobanka-bot` — Telegram polling и выдача доступа;
+- `marilobanka-web` — callback и страницы возврата Robokassa.
 
-- приветствие и тестовый интерфейс маникюрного клуба;
-- копирование готового приветственного поста из указанного Telegram-чата;
-- безопасный режим без оплаты при незаполненной Robokassa;
-- SQLite-база пользователей и заказов;
-- проверка callback-подписи Robokassa;
-- одноразовые ссылки в закрытый канал после подтверждённой оплаты;
-- отдельные файл логов и PM2-процесс с автоматическим перезапуском.
+Без полного набора платёжных и налоговых настроек бот остаётся в безопасном
+демонстрационном режиме и не создаёт платёжные ссылки.
 
 ## Локальный запуск
 
@@ -18,59 +16,85 @@
 python3 -m venv bot_tg/.venv
 bot_tg/.venv/bin/pip install -r bot_tg/requirements.txt
 cp .env.example .env
-# заполните как минимум TOKEN
 cd bot_tg
 .venv/bin/python main.py
 ```
 
-Приложение ищет `.env` сначала в корне проекта, затем в `bot_tg/`. Реальный `.env` не отслеживается Git.
+Web-процесс:
 
-Проверка:
+```bash
+cd bot_tg
+.venv/bin/gunicorn --bind 127.0.0.1:18082 --workers 1 --threads 4 \
+  'web:create_app()'
+```
+
+Тесты:
 
 ```bash
 cd bot_tg
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-## Подключение закрытого канала
+## Telegram-канал
 
-1. Создайте закрытый Telegram-канал.
-2. Добавьте бота администратором и разрешите ему создавать пригласительные ссылки.
-3. Укажите числовой ID канала в `ACCESS_CHAT_ID` (обычно начинается с `-100`).
-4. Перезапустите процесс бота.
+Для приветственного поста используются `WELCOME_CHAT_ID` и
+`WELCOME_MESSAGE_ID`. Для выдачи доступа используется `ACCESS_CHAT_ID`. Бот
+должен быть администратором канала и иметь право создавать пригласительные
+ссылки. Ссылка не создаётся до подтверждения оплаты серверным callback.
 
-Для готового приветствия укажите `WELCOME_CHAT_ID` и `WELCOME_MESSAGE_ID`.
-Например, ссылка `https://t.me/c/1234567890/4` соответствует чату
-`-1001234567890` и сообщению `4`. Бот должен состоять в исходном чате и иметь
-доступ к этому сообщению. Если копирование временно не сработает, бот покажет
-резервный текст вместо ошибки.
+## Robokassa
 
-Наличие ID канала само по себе не открывает доступ: ссылка выдаётся только пользователю с подтверждённым платёжным заказом.
+Проект использует отдельный префикс `/bots/marilobanka`:
 
-## Подключение Robokassa
+- Result URL: `https://karpau.by/bots/marilobanka/robokassa/result`, POST;
+- Success URL: `https://karpau.by/bots/marilobanka/payment/success`, GET;
+- Fail URL: `https://karpau.by/bots/marilobanka/payment/fail`, GET.
 
-Заполните `MERCHANT_LOGIN`, `PASSWORD_1`, `PASSWORD_2`, `SERVER_URL` и `COST`. Все пять значений должны быть заданы одновременно. Для боевого магазина оставьте `ROBOKASSA_TEST=0`.
+Алгоритм подписи — MD5, он должен совпадать с техническими настройками
+магазина Robokassa. Приложение автоматически выбирает пару паролей:
 
-В кабинете Robokassa настройте:
+- `ROBOKASSA_TEST=1`: `PASS_TEST_1` и `PASS_TEST_2`;
+- `ROBOKASSA_TEST=0`: `PASS_1` и `PASS_2`.
 
-- Result URL: `https://ВАШ_ДОМЕН/bots/marilobanka/robokassa/result`, метод POST;
-- Success URL: `https://ВАШ_ДОМЕН/bots/marilobanka/payment/success`, метод GET;
-- Fail URL: `https://ВАШ_ДОМЕН/bots/marilobanka/payment/fail`, метод GET.
+`PASS_3` зарезервирован для API Robokassa, которым требуется третий пароль, и
+не участвует в обычном платеже или Result URL.
 
-Для приёма callback нужно отдельно запустить `web:create_app()` через Gunicorn и добавить изолированный location в Nginx. До появления реальных реквизитов web-процесс на сервере намеренно не запускается.
+Result URL проверяет подпись `OutSum:InvId:Пароль#2`, сумму заказа и отвечает
+`OK{InvId}`. Success URL не меняет статус заказа.
 
-## Развёртывание на сервере
+## Фискализация
 
-Проект разворачивается отдельно от других ботов. PM2-конфигурация находится в `deploy/ecosystem.config.js`, имя процесса — `marilobanka-bot`.
+`FISCALIZATION_MODE` обязателен для включения оплаты:
 
-```bash
-cd /var/www/h219734/data/apps/Marilobanka_bot
-python3 -m venv bot_tg/.venv
-bot_tg/.venv/bin/pip install -r bot_tg/requirements.txt
-export PATH=/usr/lib/ispnodejs/bin:$PATH
-pm2 start deploy/ecosystem.config.js
-pm2 save
-pm2 status marilobanka-bot
+- `npd` — Robokassa уполномочена формировать чеки через «Мой налог»;
+- `receipt` — приложение передаёт параметр `Receipt` для онлайн-кассы или
+  «Робочеков».
+
+Для режима `receipt` необходимо подтвердить и заполнить:
+
+```dotenv
+RECEIPT_SNO=
+RECEIPT_TAX=
+RECEIPT_PAYMENT_METHOD=
+RECEIPT_PAYMENT_OBJECT=
+RECEIPT_ITEM_NAME=
 ```
 
-Секретный `.env` хранится только на рабочей машине и сервере и никогда не отправляется в GitHub.
+`Receipt` кодируется и включается в подпись платежа по формуле
+`MerchantLogin:OutSum:InvId:Receipt:Пароль#1`.
+
+## Сервер
+
+PM2-конфигурация находится в `deploy/ecosystem.config.js`. Процессы работают
+отдельно от бота Юлианны. Web-процесс слушает только локальный адрес
+`127.0.0.1:18082`; публичный маршрут должен проксироваться отдельно.
+
+```bash
+export PATH=/usr/lib/ispnodejs/bin:$PATH
+pm2 startOrReload deploy/ecosystem.config.js
+pm2 save
+pm2 status marilobanka-bot marilobanka-web
+```
+
+Секретный `.env` хранится только локально и на сервере с правами `600` и не
+отслеживается Git.
