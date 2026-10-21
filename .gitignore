@@ -2,6 +2,7 @@
 .env
 .idea/
 .venv/
+.venv-docs/
 bot_tg/.env
 bot_tg/.venv/
 bot_tg/*.db
