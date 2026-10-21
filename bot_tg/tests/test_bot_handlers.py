@@ -7,15 +7,33 @@ from unittest.mock import AsyncMock
 
 from telegram.error import TelegramError
 
-from bot_handlers import MAIN_MENU_KEYBOARD, offer, send_welcome, show_payment
+from bot_handlers import (
+    MAIN_MENU_KEYBOARD,
+    offer,
+    payment_keyboard,
+    send_welcome,
+    show_payment,
+)
 from database import Database
 from tests.helpers import make_settings
 
 
 class PaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
-    def test_main_menu_contains_offer(self) -> None:
-        labels = [button.text for row in MAIN_MENU_KEYBOARD.keyboard for button in row]
-        self.assertIn("Оферта", labels)
+    def test_main_menu_omits_redundant_buttons(self) -> None:
+        rows = [[button.text for button in row] for row in MAIN_MENU_KEYBOARD.keyboard]
+
+        self.assertEqual(rows, [["Мой доступ"], ["Оферта", "Поддержка"]])
+
+    def test_payment_keyboard_matches_public_layout(self) -> None:
+        payment_url = "https://example.test/payment"
+
+        keyboard = payment_keyboard(payment_url)
+
+        self.assertEqual(
+            [[button.text for button in row] for row in keyboard.inline_keyboard],
+            [["Оплатить 🇷🇺 🇧🇾 🇪🇺"], ["Оферта"]],
+        )
+        self.assertEqual(keyboard.inline_keyboard[0][0].url, payment_url)
 
     async def test_payment_is_hidden_until_channel_is_configured(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -38,6 +56,38 @@ class PaymentHandlerTests(unittest.IsolatedAsyncioTestCase):
             response_text = message.reply_text.await_args.args[0]
             self.assertIn("оплата временно недоступна", response_text)
             self.assertFalse(database.is_paid(40))
+
+    async def test_payment_message_uses_discount_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            database = Database(settings.database_path)
+            database.init_schema()
+            message = SimpleNamespace(reply_text=AsyncMock())
+            update = SimpleNamespace(
+                effective_user=SimpleNamespace(id=41, username="visitor"),
+                effective_message=message,
+            )
+            context = SimpleNamespace(
+                application=SimpleNamespace(
+                    bot_data={"settings": settings, "database": database}
+                )
+            )
+
+            await show_payment(update, context)
+
+            response_text = message.reply_text.await_args.args[0]
+            response_kwargs = message.reply_text.await_args.kwargs
+            self.assertIn(
+                f"<s>4990 руб</s> {settings.cost:g} руб",
+                response_text,
+            )
+            self.assertEqual(response_kwargs["parse_mode"], "HTML")
+            labels = [
+                button.text
+                for row in response_kwargs["reply_markup"].inline_keyboard
+                for button in row
+            ]
+            self.assertEqual(labels, ["Оплатить 🇷🇺 🇧🇾 🇪🇺", "Оферта"])
 
 
 class WelcomeHandlerTests(unittest.IsolatedAsyncioTestCase):

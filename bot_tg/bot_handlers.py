@@ -8,6 +8,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
+from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -28,8 +29,7 @@ log = logging.getLogger(__name__)
 
 MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["Оформить доступ"],
-        ["Мой доступ", "О гайде"],
+        ["Мой доступ"],
         ["Оферта", "Поддержка"],
     ],
     resize_keyboard=True,
@@ -40,9 +40,14 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
 
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Оферта", callback_data="offer")]]
+    )
+
+
+def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("Оформить доступ", callback_data="buy_access")],
-            [InlineKeyboardButton("Что внутри?", callback_data="about")],
+            [InlineKeyboardButton("Оплатить 🇷🇺 🇧🇾 🇪🇺", url=payment_url)],
             [InlineKeyboardButton("Оферта", callback_data="offer")],
         ]
     )
@@ -85,6 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     database.upsert_user(user.id, user.username)
     database.mark_welcome_sent(user.id)
     await send_welcome(update, context)
+    await show_payment(update, context)
 
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -141,16 +147,13 @@ async def show_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         settings, order["inv_id"], Decimal(order["amount"])
     )
     await update.effective_message.reply_text(
-        f"Гайд «Домашний уход за стопами»: {settings.cost:.2f} ₽.\n\n"
+        "Гайд «Домашний уход за стопами»\n\n"
+        f"<s>4990 руб</s> {settings.cost:g} руб\n\n"
         "После подтверждения оплаты бот пришлёт персональную ссылку.\n\n"
-        "Нажимая «Перейти к оплате», вы подтверждаете, что ознакомились "
+        "Нажимая «Оплатить», вы подтверждаете, что ознакомились "
         "с условиями публичной оферты и принимаете их.",
-        reply_markup=InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("Перейти к оплате", url=payment_url)],
-                [InlineKeyboardButton("Оферта", callback_data="offer")],
-            ]
-        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=payment_keyboard(payment_url),
     )
 
 
