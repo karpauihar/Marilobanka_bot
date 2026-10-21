@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -46,6 +47,19 @@ def _url_prefix(value: str) -> str:
     return prefix
 
 
+def _optional_telegram_url(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or parsed.netloc.lower() not in {
+        "t.me",
+        "www.t.me",
+    }:
+        raise RuntimeError(f"{name} must be an HTTPS t.me URL")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     token: str
@@ -57,6 +71,7 @@ class Settings:
     url_prefix: str
     cost: Decimal
     access_chat_id: int | None
+    access_channel_url: str
     welcome_chat_id: int | None
     welcome_message_id: int | None
     offer_chat_id: int | None
@@ -222,6 +237,7 @@ def load_settings() -> Settings:
         url_prefix=_url_prefix(os.getenv("URL_PREFIX", "/bots/marilobanka")),
         cost=cost,
         access_chat_id=_optional_int("ACCESS_CHAT_ID"),
+        access_channel_url=_optional_telegram_url("ACCESS_CHANNEL_URL"),
         welcome_chat_id=welcome_chat_id,
         welcome_message_id=welcome_message_id,
         offer_chat_id=offer_chat_id,

@@ -39,6 +39,20 @@ class ConfigTests(unittest.TestCase):
                 load_settings()
         load_settings.cache_clear()
 
+    def test_access_channel_url_must_be_telegram_https(self) -> None:
+        environment = {
+            "TOKEN": "123:test-token",
+            "ACCESS_CHANNEL_URL": "https://example.test/channel",
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch("config.load_dotenv"),
+        ):
+            load_settings.cache_clear()
+            with self.assertRaisesRegex(RuntimeError, "HTTPS t.me URL"):
+                load_settings()
+        load_settings.cache_clear()
+
     def test_test_mode_selects_test_password_pair(self) -> None:
         environment = {
             "TOKEN": "123:test-token",

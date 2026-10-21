@@ -50,11 +50,22 @@ async def issue_channel_access(
 
     if _is_active_member(member):
         database.mark_channel_member(user_id, settings.access_chat_id)
+        text = "Вы уже состоите в закрытом канале. Доступ активен."
+        message_options: dict[str, object] = {}
+        if settings.access_channel_url:
+            text += (
+                "\n\nЕсли вы не видите канал в списке чатов, "
+                f'откройте его по <a href="{settings.access_channel_url}">этой '
+                "ссылке</a>."
+            )
+            message_options["parse_mode"] = "HTML"
+            message_options["disable_web_page_preview"] = True
         await bot.send_message(
             chat_id=user_id,
-            text="Вы уже состоите в закрытом канале. Доступ активен.",
+            text=text,
             reply_markup=member_reply_markup,
             protect_content=True,
+            **message_options,
         )
         return AccessResult("already_member")
 
