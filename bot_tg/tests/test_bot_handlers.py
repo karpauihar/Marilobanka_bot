@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from telegram.error import TelegramError
+
 from bot_handlers import MAIN_MENU_KEYBOARD, offer, send_welcome, show_payment
 from database import Database
 from tests.helpers import make_settings
@@ -63,6 +65,34 @@ class WelcomeHandlerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OfferHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_configured_offer_message_is_copied(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = replace(
+                make_settings(Path(directory)),
+                offer_chat_id=-1004311095377,
+                offer_message_id=6,
+            )
+            message = SimpleNamespace(reply_document=AsyncMock())
+            bot = SimpleNamespace(copy_message=AsyncMock())
+            update = SimpleNamespace(
+                effective_chat=SimpleNamespace(id=50),
+                effective_message=message,
+            )
+            context = SimpleNamespace(
+                bot=bot,
+                application=SimpleNamespace(bot_data={"settings": settings}),
+            )
+
+            await offer(update, context)
+
+            bot.copy_message.assert_awaited_once_with(
+                chat_id=50,
+                from_chat_id=-1004311095377,
+                message_id=6,
+                protect_content=True,
+            )
+            message.reply_document.assert_not_awaited()
+
     async def test_offer_pdf_is_sent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             offer_path = Path(directory) / "offer.pdf"
@@ -73,7 +103,8 @@ class OfferHandlerTests(unittest.IsolatedAsyncioTestCase):
             message = SimpleNamespace(reply_document=AsyncMock())
             update = SimpleNamespace(effective_message=message)
             context = SimpleNamespace(
-                application=SimpleNamespace(bot_data={"settings": settings})
+                bot=SimpleNamespace(copy_message=AsyncMock()),
+                application=SimpleNamespace(bot_data={"settings": settings}),
             )
 
             await offer(update, context)
@@ -83,3 +114,31 @@ class OfferHandlerTests(unittest.IsolatedAsyncioTestCase):
                 message.reply_document.await_args.kwargs["filename"],
                 offer_path.name,
             )
+
+    async def test_offer_pdf_is_fallback_when_copy_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            offer_path = Path(directory) / "offer.pdf"
+            offer_path.write_bytes(b"%PDF-test")
+            settings = replace(
+                make_settings(Path(directory)),
+                offer_chat_id=-1004311095377,
+                offer_message_id=6,
+                offer_file_path=offer_path,
+            )
+            message = SimpleNamespace(reply_document=AsyncMock())
+            bot = SimpleNamespace(
+                copy_message=AsyncMock(side_effect=TelegramError("copy failed"))
+            )
+            update = SimpleNamespace(
+                effective_chat=SimpleNamespace(id=50),
+                effective_message=message,
+            )
+            context = SimpleNamespace(
+                bot=bot,
+                application=SimpleNamespace(bot_data={"settings": settings}),
+            )
+
+            await offer(update, context)
+
+            bot.copy_message.assert_awaited_once()
+            message.reply_document.assert_awaited_once()

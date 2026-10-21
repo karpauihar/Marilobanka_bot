@@ -59,6 +59,8 @@ class Settings:
     access_chat_id: int | None
     welcome_chat_id: int | None
     welcome_message_id: int | None
+    offer_chat_id: int | None
+    offer_message_id: int | None
     support_url: str
     offer_file_path: Path | None
     database_path: Path
@@ -105,6 +107,10 @@ class Settings:
     def welcome_configured(self) -> bool:
         return self.welcome_chat_id is not None and self.welcome_message_id is not None
 
+    @property
+    def offer_message_configured(self) -> bool:
+        return self.offer_chat_id is not None and self.offer_message_id is not None
+
 
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
@@ -139,6 +145,13 @@ def load_settings() -> Settings:
         )
     if welcome_message_id is not None and welcome_message_id <= 0:
         raise RuntimeError("WELCOME_MESSAGE_ID must be greater than zero")
+
+    offer_chat_id = _optional_int("OFFER_CHAT_ID")
+    offer_message_id = _optional_int("OFFER_MESSAGE_ID")
+    if (offer_chat_id is None) != (offer_message_id is None):
+        raise RuntimeError("OFFER_CHAT_ID and OFFER_MESSAGE_ID must be set together")
+    if offer_message_id is not None and offer_message_id <= 0:
+        raise RuntimeError("OFFER_MESSAGE_ID must be greater than zero")
 
     robokassa_test = _as_bool(os.getenv("ROBOKASSA_TEST", "0"))
     password_1_name = "PASS_TEST_1" if robokassa_test else "PASS_1"
@@ -211,6 +224,8 @@ def load_settings() -> Settings:
         access_chat_id=_optional_int("ACCESS_CHAT_ID"),
         welcome_chat_id=welcome_chat_id,
         welcome_message_id=welcome_message_id,
+        offer_chat_id=offer_chat_id,
+        offer_message_id=offer_message_id,
         support_url=os.getenv("SUPPORT_URL", "").strip(),
         offer_file_path=offer_file_path,
         database_path=_path("DATABASE_PATH", "bot.db"),

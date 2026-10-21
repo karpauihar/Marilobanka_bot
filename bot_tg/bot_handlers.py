@@ -211,19 +211,35 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
-    if settings.offer_file_path is None:
-        await update.effective_message.reply_text(
-            "Оферта будет опубликована перед подключением оплаты.",
-            reply_markup=MAIN_MENU_KEYBOARD,
-        )
+    if settings.offer_message_configured:
+        try:
+            await context.bot.copy_message(
+                chat_id=update.effective_chat.id,
+                from_chat_id=settings.offer_chat_id,
+                message_id=settings.offer_message_id,
+                protect_content=True,
+            )
+            return
+        except TelegramError as exc:
+            log.warning(
+                "Offer copy failed error_type=%s",
+                type(exc).__name__,
+            )
+
+    if settings.offer_file_path is not None:
+        with settings.offer_file_path.open("rb") as document:
+            await update.effective_message.reply_document(
+                document=document,
+                filename=settings.offer_file_path.name,
+                reply_markup=MAIN_MENU_KEYBOARD,
+                protect_content=True,
+            )
         return
-    with settings.offer_file_path.open("rb") as document:
-        await update.effective_message.reply_document(
-            document=document,
-            filename=settings.offer_file_path.name,
-            reply_markup=MAIN_MENU_KEYBOARD,
-            protect_content=True,
-        )
+
+    await update.effective_message.reply_text(
+        "Оферта будет опубликована перед подключением оплаты.",
+        reply_markup=MAIN_MENU_KEYBOARD,
+    )
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

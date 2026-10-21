@@ -25,6 +25,20 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(settings.channel_configured)
         self.assertTrue(settings.welcome_configured)
 
+    def test_offer_message_requires_chat_and_message_id(self) -> None:
+        environment = {
+            "TOKEN": "123:test-token",
+            "OFFER_CHAT_ID": "-1004311095377",
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch("config.load_dotenv"),
+        ):
+            load_settings.cache_clear()
+            with self.assertRaisesRegex(RuntimeError, "must be set together"):
+                load_settings()
+        load_settings.cache_clear()
+
     def test_test_mode_selects_test_password_pair(self) -> None:
         environment = {
             "TOKEN": "123:test-token",
