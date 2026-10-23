@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from telegram.error import TelegramError
+from telegram.ext import ApplicationHandlerStop
 
 from bot_handlers import (
     MAIN_MENU_KEYBOARD,
@@ -13,9 +14,34 @@ from bot_handlers import (
     payment_keyboard,
     send_welcome,
     show_payment,
+    silence_service_chats,
 )
 from database import Database
 from tests.helpers import make_settings
+
+
+class ServiceChatSilencingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_updates_from_source_and_access_chats_are_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            context = SimpleNamespace(
+                application=SimpleNamespace(bot_data={"settings": settings})
+            )
+
+            for chat_id in {settings.welcome_chat_id, settings.access_chat_id}:
+                update = SimpleNamespace(effective_chat=SimpleNamespace(id=chat_id))
+                with self.assertRaises(ApplicationHandlerStop):
+                    await silence_service_chats(update, context)
+
+    async def test_private_chat_updates_continue(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            context = SimpleNamespace(
+                application=SimpleNamespace(bot_data={"settings": settings})
+            )
+            update = SimpleNamespace(effective_chat=SimpleNamespace(id=123456789))
+
+            await silence_service_chats(update, context)
 
 
 class PaymentHandlerTests(unittest.IsolatedAsyncioTestCase):

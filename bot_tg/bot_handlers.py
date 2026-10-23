@@ -12,11 +12,13 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
@@ -51,6 +53,23 @@ def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("Оферта", callback_data="offer")],
         ]
     )
+
+
+async def silence_service_chats(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    service_chat_ids = {
+        chat_id
+        for chat_id in (
+            settings.welcome_chat_id,
+            settings.offer_chat_id,
+            settings.access_chat_id,
+        )
+        if chat_id is not None
+    }
+    if update.effective_chat and update.effective_chat.id in service_chat_ids:
+        raise ApplicationHandlerStop
 
 
 async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -328,6 +347,7 @@ def build_application(settings: Settings, database: Database) -> Application:
         .build()
     )
     application.bot_data.update(settings=settings, database=database)
+    application.add_handler(TypeHandler(Update, silence_service_chats), group=-1)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(
