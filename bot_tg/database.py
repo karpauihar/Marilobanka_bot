@@ -181,6 +181,8 @@ class Database:
                 return "amount_mismatch"
             if order["status"] == "paid":
                 return "already_paid"
+            if order["status"] == "cancelled":
+                return "cancelled"
             connection.execute(
                 "UPDATE orders SET status = 'paid', paid_at = ? WHERE inv_id = ?",
                 (now, inv_id),

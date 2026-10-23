@@ -45,6 +45,8 @@ def create_app(
             return Response("order not found", status=404, mimetype="text/plain")
         if result == "amount_mismatch":
             return Response("amount mismatch", status=400, mimetype="text/plain")
+        if result == "cancelled":
+            return Response("order cancelled", status=409, mimetype="text/plain")
         return Response(f"OK{inv_id}", status=200, mimetype="text/plain")
 
     @app.get(f"{prefix}/payment/success")

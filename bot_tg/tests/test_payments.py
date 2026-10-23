@@ -48,6 +48,31 @@ class PaymentTests(unittest.TestCase):
             [calculate_signature("merchant", "100.00", 43, "password-one")],
         )
 
+    def test_receipt_production_link_uses_live_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = replace(
+                make_settings(Path(directory)),
+                robokassa_test=False,
+                password_1="live-password-one",
+            )
+            params = parse_qs(urlparse(generate_payment_link(settings, 44)).query)
+
+        self.assertEqual(params["IsTest"], ["0"])
+        self.assertIn("Receipt", params)
+        encoded_receipt = params["Receipt"][0]
+        self.assertEqual(
+            params["SignatureValue"],
+            [
+                calculate_signature(
+                    "merchant",
+                    "100.00",
+                    44,
+                    encoded_receipt,
+                    "live-password-one",
+                )
+            ],
+        )
+
     def test_link_is_blocked_without_real_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings = make_settings(Path(directory), configured=False)

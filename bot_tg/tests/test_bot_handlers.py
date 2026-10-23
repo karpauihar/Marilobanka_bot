@@ -88,6 +88,7 @@ class ChannelMembershipTests(unittest.IsolatedAsyncioTestCase):
                 call["text"],
             )
             self.assertEqual(call["parse_mode"], "HTML")
+            self.assertIs(call["reply_markup"], MAIN_MENU_KEYBOARD)
 
     async def test_unpaid_join_does_not_receive_access_message(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

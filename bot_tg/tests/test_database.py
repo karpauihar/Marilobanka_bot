@@ -34,6 +34,22 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertFalse(self.database.is_paid(11))
 
+    def test_cancelled_order_cannot_be_marked_paid(self) -> None:
+        order = self.database.get_or_create_pending_order(
+            12, "cancelled", Decimal("100.00")
+        )
+        with self.database.connect() as connection:
+            connection.execute(
+                "UPDATE orders SET status = 'cancelled' WHERE inv_id = ?",
+                (order["inv_id"],),
+            )
+
+        self.assertEqual(
+            self.database.mark_order_paid(order["inv_id"], Decimal("100.00")),
+            "cancelled",
+        )
+        self.assertFalse(self.database.is_paid(12))
+
     def test_order_numbers_are_large_and_unique(self) -> None:
         first = self.database.get_or_create_pending_order(
             20, "first", Decimal("100.00")

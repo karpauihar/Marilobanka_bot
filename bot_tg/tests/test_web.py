@@ -80,6 +80,35 @@ class WebTests(unittest.TestCase):
             self.assertEqual(first.status_code, 200)
             self.assertEqual(second.status_code, 200)
 
+    def test_cancelled_order_callback_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            database = Database(settings.database_path)
+            database.init_schema()
+            order = database.get_or_create_pending_order(
+                33, "cancelled", Decimal("100.00")
+            )
+            with database.connect() as connection:
+                connection.execute(
+                    "UPDATE orders SET status = 'cancelled' WHERE inv_id = ?",
+                    (order["inv_id"],),
+                )
+            inv_id = str(order["inv_id"])
+            payload = {
+                "OutSum": "100.000000",
+                "InvId": inv_id,
+                "SignatureValue": calculate_signature(
+                    "100.000000", inv_id, settings.password_2
+                ),
+            }
+
+            response = create_app(settings, database).test_client().post(
+                f"{settings.url_prefix}/robokassa/result", data=payload
+            )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertFalse(database.is_paid(33))
+
     def test_health_reports_readiness_without_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings = make_settings(Path(directory))

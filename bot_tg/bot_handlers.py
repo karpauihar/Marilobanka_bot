@@ -99,7 +99,13 @@ async def channel_membership_changed(
     user_id = membership.new_chat_member.user.id
     if not database.is_paid(user_id):
         return
-    await send_active_channel_access(context.bot, settings, database, user_id)
+    await send_active_channel_access(
+        context.bot,
+        settings,
+        database,
+        user_id,
+        reply_markup=MAIN_MENU_KEYBOARD,
+    )
 
 
 async def send_welcome(
