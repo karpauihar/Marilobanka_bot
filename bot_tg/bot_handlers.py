@@ -40,10 +40,14 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 
-def start_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Оферта", callback_data="offer")]]
-    )
+def start_keyboard(payment_url: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if payment_url:
+        rows.append(
+            [InlineKeyboardButton("Оплатить 🇷🇺 🇧🇾 🇪🇺", url=payment_url)]
+        )
+    rows.append([InlineKeyboardButton("Оферта", callback_data="offer")])
+    return InlineKeyboardMarkup(rows)
 
 
 def payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
@@ -72,7 +76,11 @@ async def silence_service_chats(
         raise ApplicationHandlerStop
 
 
-async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def send_welcome(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    payment_url: str | None = None,
+) -> None:
     settings: Settings = context.application.bot_data["settings"]
     welcome_sent = False
     if settings.welcome_configured:
@@ -81,7 +89,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 chat_id=update.effective_chat.id,
                 from_chat_id=settings.welcome_chat_id,
                 message_id=settings.welcome_message_id,
-                reply_markup=start_keyboard(),
+                reply_markup=start_keyboard(payment_url),
             )
             welcome_sent = True
         except TelegramError as exc:
@@ -95,21 +103,36 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "Добро пожаловать! ✨\n\n"
             "Здесь находится гайд «Домашний уход за стопами» и дополнительные "
             "информационные материалы. Сейчас бот работает в тестовом режиме.",
-            reply_markup=start_keyboard(),
+            reply_markup=start_keyboard(payment_url),
         )
-    await update.effective_message.reply_text(
-        "Используйте меню, чтобы посмотреть макет бота.",
-        reply_markup=MAIN_MENU_KEYBOARD,
-    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
     database: Database = context.application.bot_data["database"]
     user = update.effective_user
     database.upsert_user(user.id, user.username)
     database.mark_welcome_sent(user.id)
-    await send_welcome(update, context)
-    await show_payment(update, context)
+
+    payment_url = None
+    if (
+        not database.is_paid(user.id)
+        and settings.payment_configured
+        and settings.channel_configured
+    ):
+        order = database.get_or_create_pending_order(
+            user.id, user.username, settings.cost
+        )
+        if order is not None:
+            payment_url = generate_payment_link(
+                settings,
+                order["inv_id"],
+                Decimal(order["amount"]),
+            )
+
+    await send_welcome(update, context, payment_url)
+    if database.is_paid(user.id):
+        await send_channel_access(update, context)
 
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -359,6 +382,6 @@ def build_application(settings: Settings, database: Database) -> Application:
     application.add_handler(MessageHandler(filters.Regex("^О гайде$"), about))
     application.add_handler(MessageHandler(filters.Regex("^Поддержка$"), support))
     application.add_handler(MessageHandler(filters.Regex("^Оферта$"), offer))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support))
+    application.add_handler(MessageHandler(filters.ALL, support))
     application.add_error_handler(error_handler)
     return application

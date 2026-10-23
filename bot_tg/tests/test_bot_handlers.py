@@ -15,6 +15,8 @@ from bot_handlers import (
     send_welcome,
     show_payment,
     silence_service_chats,
+    start,
+    support,
 )
 from database import Database
 from tests.helpers import make_settings
@@ -131,13 +133,71 @@ class WelcomeHandlerTests(unittest.IsolatedAsyncioTestCase):
                 application=SimpleNamespace(bot_data={"settings": settings}),
             )
 
-            await send_welcome(update, context)
+            await send_welcome(update, context, "https://example.test/payment")
 
             bot.copy_message.assert_awaited_once()
             call = bot.copy_message.await_args.kwargs
             self.assertEqual(call["from_chat_id"], settings.welcome_chat_id)
             self.assertEqual(call["message_id"], settings.welcome_message_id)
-            self.assertEqual(message.reply_text.await_count, 1)
+            self.assertEqual(
+                [
+                    button.text
+                    for row in call["reply_markup"].inline_keyboard
+                    for button in row
+                ],
+                ["Оплатить 🇷🇺 🇧🇾 🇪🇺", "Оферта"],
+            )
+            message.reply_text.assert_not_awaited()
+
+    async def test_start_sends_only_welcome_with_payment_buttons(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            database = Database(settings.database_path)
+            database.init_schema()
+            message = SimpleNamespace(reply_text=AsyncMock())
+            bot = SimpleNamespace(copy_message=AsyncMock())
+            update = SimpleNamespace(
+                effective_user=SimpleNamespace(id=55, username="buyer"),
+                effective_chat=SimpleNamespace(id=55),
+                effective_message=message,
+            )
+            context = SimpleNamespace(
+                bot=bot,
+                application=SimpleNamespace(
+                    bot_data={"settings": settings, "database": database}
+                ),
+            )
+
+            await start(update, context)
+
+            bot.copy_message.assert_awaited_once()
+            keyboard = bot.copy_message.await_args.kwargs["reply_markup"]
+            self.assertTrue(keyboard.inline_keyboard[0][0].url)
+            self.assertEqual(keyboard.inline_keyboard[1][0].text, "Оферта")
+            message.reply_text.assert_not_awaited()
+
+
+class SupportHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_support_directs_any_message_to_configured_contact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = replace(
+                make_settings(Path(directory)),
+                support_url="https://t.me/karpovigors",
+            )
+            message = SimpleNamespace(reply_text=AsyncMock())
+            update = SimpleNamespace(effective_message=message)
+            context = SimpleNamespace(
+                application=SimpleNamespace(bot_data={"settings": settings})
+            )
+
+            await support(update, context)
+
+            message.reply_text.assert_awaited_once()
+            markup = message.reply_text.await_args.kwargs["reply_markup"]
+            self.assertEqual(
+                markup.inline_keyboard[0][0].url,
+                "https://t.me/karpovigors",
+            )
 
 
 class OfferHandlerTests(unittest.IsolatedAsyncioTestCase):
