@@ -70,7 +70,7 @@ class ChannelAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bot.sent), 1)
         message = bot.sent[0]
         self.assertIn(
-            'по <a href="https://t.me/c/3918171171/5">этой ссылке</a>.',
+            'по <a href="https://t.me/c/3918171171/4">этой ссылке</a>.',
             message["text"],
         )
         self.assertEqual(message["parse_mode"], "HTML")

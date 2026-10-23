@@ -15,6 +15,7 @@ from telegram.ext import (
     ApplicationHandlerStop,
     ApplicationBuilder,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -22,7 +23,11 @@ from telegram.ext import (
     filters,
 )
 
-from channel_access import issue_channel_access
+from channel_access import (
+    is_active_member,
+    issue_channel_access,
+    send_active_channel_access,
+)
 from config import Settings
 from database import Database
 from payments import generate_payment_link
@@ -74,6 +79,27 @@ async def silence_service_chats(
     }
     if update.effective_chat and update.effective_chat.id in service_chat_ids:
         raise ApplicationHandlerStop
+
+
+async def channel_membership_changed(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    membership = update.chat_member
+    if membership is None:
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    if membership.chat.id != settings.access_chat_id:
+        return
+    if is_active_member(membership.old_chat_member) or not is_active_member(
+        membership.new_chat_member
+    ):
+        return
+
+    database: Database = context.application.bot_data["database"]
+    user_id = membership.new_chat_member.user.id
+    if not database.is_paid(user_id):
+        return
+    await send_active_channel_access(context.bot, settings, database, user_id)
 
 
 async def send_welcome(
@@ -370,6 +396,13 @@ def build_application(settings: Settings, database: Database) -> Application:
         .build()
     )
     application.bot_data.update(settings=settings, database=database)
+    application.add_handler(
+        ChatMemberHandler(
+            channel_membership_changed,
+            chat_member_types=ChatMemberHandler.CHAT_MEMBER,
+        ),
+        group=-2,
+    )
     application.add_handler(TypeHandler(Update, silence_service_chats), group=-1)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))

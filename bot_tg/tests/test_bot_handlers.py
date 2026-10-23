@@ -10,6 +10,7 @@ from telegram.ext import ApplicationHandlerStop
 
 from bot_handlers import (
     MAIN_MENU_KEYBOARD,
+    channel_membership_changed,
     offer,
     payment_keyboard,
     send_welcome,
@@ -44,6 +45,81 @@ class ServiceChatSilencingTests(unittest.IsolatedAsyncioTestCase):
             update = SimpleNamespace(effective_chat=SimpleNamespace(id=123456789))
 
             await silence_service_chats(update, context)
+
+
+class ChannelMembershipTests(unittest.IsolatedAsyncioTestCase):
+    async def test_paid_user_gets_direct_post_link_after_joining(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            database = Database(settings.database_path)
+            database.init_schema()
+            order = database.get_or_create_pending_order(
+                77, "buyer", settings.cost
+            )
+            database.mark_order_paid(order["inv_id"], settings.cost)
+            bot = SimpleNamespace(send_message=AsyncMock())
+            update = SimpleNamespace(
+                chat_member=SimpleNamespace(
+                    chat=SimpleNamespace(id=settings.access_chat_id),
+                    old_chat_member=SimpleNamespace(
+                        status="left",
+                        is_member=False,
+                    ),
+                    new_chat_member=SimpleNamespace(
+                        status="member",
+                        is_member=True,
+                        user=SimpleNamespace(id=77),
+                    ),
+                )
+            )
+            context = SimpleNamespace(
+                bot=bot,
+                application=SimpleNamespace(
+                    bot_data={"settings": settings, "database": database}
+                ),
+            )
+
+            await channel_membership_changed(update, context)
+
+            bot.send_message.assert_awaited_once()
+            call = bot.send_message.await_args.kwargs
+            self.assertIn(
+                'href="https://t.me/c/3918171171/4"',
+                call["text"],
+            )
+            self.assertEqual(call["parse_mode"], "HTML")
+
+    async def test_unpaid_join_does_not_receive_access_message(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            database = Database(settings.database_path)
+            database.init_schema()
+            database.upsert_user(78, "visitor")
+            bot = SimpleNamespace(send_message=AsyncMock())
+            update = SimpleNamespace(
+                chat_member=SimpleNamespace(
+                    chat=SimpleNamespace(id=settings.access_chat_id),
+                    old_chat_member=SimpleNamespace(
+                        status="left",
+                        is_member=False,
+                    ),
+                    new_chat_member=SimpleNamespace(
+                        status="member",
+                        is_member=True,
+                        user=SimpleNamespace(id=78),
+                    ),
+                )
+            )
+            context = SimpleNamespace(
+                bot=bot,
+                application=SimpleNamespace(
+                    bot_data={"settings": settings, "database": database}
+                ),
+            )
+
+            await channel_membership_changed(update, context)
+
+            bot.send_message.assert_not_awaited()
 
 
 class PaymentHandlerTests(unittest.IsolatedAsyncioTestCase):

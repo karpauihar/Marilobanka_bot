@@ -22,13 +22,42 @@ class AccessResult:
     invite_link: str | None = None
 
 
-def _is_active_member(member: object | None) -> bool:
+def is_active_member(member: object | None) -> bool:
     if member is None:
         return False
     status = getattr(member, "status", "")
     if status in ACTIVE_MEMBER_STATUSES:
         return True
     return status == "restricted" and bool(getattr(member, "is_member", False))
+
+
+async def send_active_channel_access(
+    bot: Bot,
+    settings: Settings,
+    database: Database,
+    user_id: int,
+    reply_markup: ReplyKeyboardMarkup | None = None,
+) -> None:
+    if settings.access_chat_id is None:
+        return
+    database.mark_channel_member(user_id, settings.access_chat_id)
+    text = "Вы уже состоите в закрытом канале. Доступ активен."
+    message_options: dict[str, object] = {}
+    if settings.access_channel_url:
+        text += (
+            "\n\nЕсли вы не видите канал в списке чатов, "
+            f'откройте его по <a href="{settings.access_channel_url}">этой '
+            "ссылке</a>."
+        )
+        message_options["parse_mode"] = "HTML"
+        message_options["disable_web_page_preview"] = True
+    await bot.send_message(
+        chat_id=user_id,
+        text=text,
+        reply_markup=reply_markup,
+        protect_content=True,
+        **message_options,
+    )
 
 
 async def issue_channel_access(
@@ -48,24 +77,13 @@ async def issue_channel_access(
     except BadRequest:
         member = None
 
-    if _is_active_member(member):
-        database.mark_channel_member(user_id, settings.access_chat_id)
-        text = "Вы уже состоите в закрытом канале. Доступ активен."
-        message_options: dict[str, object] = {}
-        if settings.access_channel_url:
-            text += (
-                "\n\nЕсли вы не видите канал в списке чатов, "
-                f'откройте его по <a href="{settings.access_channel_url}">этой '
-                "ссылке</a>."
-            )
-            message_options["parse_mode"] = "HTML"
-            message_options["disable_web_page_preview"] = True
-        await bot.send_message(
-            chat_id=user_id,
-            text=text,
+    if is_active_member(member):
+        await send_active_channel_access(
+            bot,
+            settings,
+            database,
+            user_id,
             reply_markup=member_reply_markup,
-            protect_content=True,
-            **message_options,
         )
         return AccessResult("already_member")
 

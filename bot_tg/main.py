@@ -2,6 +2,7 @@ import asyncio
 import logging
 from logging.handlers import RotatingFileHandler
 
+from telegram import Update
 from telegram.ext import Application
 
 from bot_handlers import build_application
@@ -32,7 +33,10 @@ def run() -> None:
     database = Database(settings.database_path)
     database.init_schema()
     application: Application = build_application(settings, database)
-    application.run_polling(allowed_updates=None, drop_pending_updates=False)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=False,
+    )
 
 
 if __name__ == "__main__":
