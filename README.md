@@ -60,8 +60,11 @@ python3 -m venv .venv-docs
 Проект использует отдельный префикс `/bots/marilobanka`:
 
 - Result URL: `https://karpau.by/bots/marilobanka/robokassa/result`, POST;
-- Success URL: `https://karpau.by/bots/marilobanka/payment/success`, GET;
-- Fail URL: `https://karpau.by/bots/marilobanka/payment/fail`, GET.
+- Success URL: `https://karpau.by/bots/marilobanka/robokassa/success`, GET;
+- Fail URL: `https://karpau.by/bots/marilobanka/robokassa/fail`, GET.
+
+Старые адреса `/payment/success` и `/payment/fail` сохранены как совместимые
+алиасы, но в кабинете Robokassa следует указывать адреса выше.
 
 Алгоритм подписи — MD5, он должен совпадать с техническими настройками
 магазина Robokassa. Приложение автоматически выбирает пару паролей:

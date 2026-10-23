@@ -48,6 +48,7 @@ def create_app(
         return Response(f"OK{inv_id}", status=200, mimetype="text/plain")
 
     @app.get(f"{prefix}/payment/success")
+    @app.get(f"{prefix}/robokassa/success")
     def payment_success() -> str:
         return (
             "<h1>Оплата прошла успешно</h1>"
@@ -55,6 +56,7 @@ def create_app(
         )
 
     @app.get(f"{prefix}/payment/fail")
+    @app.get(f"{prefix}/robokassa/fail")
     def payment_fail() -> str:
         return (
             "<h1>Оплата не завершена</h1>"

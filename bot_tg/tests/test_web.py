@@ -89,3 +89,27 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["payments_configured"])
         self.assertNotIn("password", payload)
+
+    def test_robokassa_return_pages_are_available_by_public_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            client = create_app(settings).test_client()
+
+            success = client.get(f"{settings.url_prefix}/robokassa/success")
+            fail = client.get(f"{settings.url_prefix}/robokassa/fail")
+
+        self.assertEqual(success.status_code, 200)
+        self.assertIn("Оплата прошла успешно", success.get_data(as_text=True))
+        self.assertEqual(fail.status_code, 200)
+        self.assertIn("Оплата не завершена", fail.get_data(as_text=True))
+
+    def test_legacy_return_page_urls_remain_available(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            client = create_app(settings).test_client()
+
+            success = client.get(f"{settings.url_prefix}/payment/success")
+            fail = client.get(f"{settings.url_prefix}/payment/fail")
+
+        self.assertEqual(success.status_code, 200)
+        self.assertEqual(fail.status_code, 200)
