@@ -76,3 +76,29 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertGreaterEqual(replacement["inv_id"], ROBOKASSA_INV_ID_FLOOR)
         self.assertEqual(self.database.get_order(7)["status"], "cancelled")
+
+    def test_price_change_creates_new_order_and_keeps_old_link_payable(self) -> None:
+        old_order = self.database.get_or_create_pending_order(
+            23, "price-change", Decimal("1499.00")
+        )
+
+        new_order = self.database.get_or_create_pending_order(
+            23, "price-change", Decimal("990.00")
+        )
+
+        self.assertNotEqual(old_order["inv_id"], new_order["inv_id"])
+        self.assertEqual(
+            self.database.get_order(old_order["inv_id"])["status"], "pending"
+        )
+        self.assertEqual(
+            self.database.get_order(new_order["inv_id"])["amount"], "990.00"
+        )
+
+        self.assertEqual(
+            self.database.mark_order_paid(old_order["inv_id"], Decimal("1499.00")),
+            "paid_now",
+        )
+        self.assertEqual(
+            self.database.get_order(new_order["inv_id"])["status"], "cancelled"
+        )
+        self.assertTrue(self.database.is_paid(23))

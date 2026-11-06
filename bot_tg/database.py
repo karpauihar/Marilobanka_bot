@@ -131,10 +131,14 @@ class Database:
                 "SELECT * FROM orders WHERE user_id = ? AND status = 'pending' ORDER BY inv_id DESC LIMIT 1",
                 (user_id,),
             ).fetchone()
-            if pending and pending["inv_id"] >= ROBOKASSA_INV_ID_FLOOR:
+            if (
+                pending
+                and pending["inv_id"] >= ROBOKASSA_INV_ID_FLOOR
+                and Decimal(pending["amount"]) == amount
+            ):
                 return pending
 
-            if pending:
+            if pending and pending["inv_id"] < ROBOKASSA_INV_ID_FLOOR:
                 connection.execute(
                     "UPDATE orders SET status = 'cancelled' WHERE inv_id = ?",
                     (pending["inv_id"],),
@@ -186,6 +190,11 @@ class Database:
             connection.execute(
                 "UPDATE orders SET status = 'paid', paid_at = ? WHERE inv_id = ?",
                 (now, inv_id),
+            )
+            connection.execute(
+                "UPDATE orders SET status = 'cancelled' "
+                "WHERE user_id = ? AND status = 'pending' AND inv_id != ?",
+                (order["user_id"], inv_id),
             )
             connection.execute(
                 "UPDATE users SET status = 'paid', paid_at = COALESCE(paid_at, ?), "
